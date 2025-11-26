@@ -1,223 +1,1484 @@
 <!DOCTYPE html>
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>網頁版碼錶</title>
-    <style>
-        /* --- CSS 樣式 --- */
-        body {
-            font-family: 'Microsoft JhengHei', sans-serif;
-            background-color: #f0f0f0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-        }
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  onAuthStateChanged,
+  signInWithCustomToken,
+  signInWithEmailAndPassword,
+  signOut
+} from 'firebase/auth';
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  setDoc, 
+  addDoc, 
+  deleteDoc, 
+  onSnapshot, 
+  serverTimestamp,
+  getDocs,
+  writeBatch
+} from 'firebase/firestore';
+import { 
+  Utensils, 
+  ClipboardList, 
+  PlusCircle, 
+  Trash2, 
+  User, 
+  ShoppingBag,
+  RefreshCw,
+  LogOut,
+  Settings,
+  BookOpen,
+  Save,
+  Download,
+  X,
+  AlertCircle,
+  CheckCircle2,
+  FileSpreadsheet,
+  ShoppingCart,
+  Send,
+  MessageSquare,
+  Lock,
+  Unlock,
+  History,
+  Calendar,
+  ChevronDown,
+  ChevronUp,
+  Upload,
+  LogIn
+} from 'lucide-react';
 
-        .container {
-            background-color: white;
-            padding: 40px;
-            border-radius: 15px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-            text-align: center;
-            width: 90%;
-            max-width: 500px;
-        }
+// --- Firebase 初始化 ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-        .time-display {
-            font-family: 'Courier New', Courier, monospace;
-            font-size: 4rem;
-            font-weight: bold;
-            color: #333;
-            margin-bottom: 30px;
-            background-color: #fafafa;
-            padding: 20px;
-            border-radius: 8px;
-            border: 1px solid #ddd;
-        }
+// --- 型別定義 ---
+interface MenuItem {
+  id: string;
+  name: string;
+  price: number;
+}
 
-        .controls {
-            display: flex;
-            justify-content: center;
-            gap: 15px;
-        }
+// 購物車項目介面
+interface CartItem extends MenuItem {
+  note: string;
+}
 
-        button {
-            font-family: 'Microsoft JhengHei', sans-serif;
-            font-size: 1.1rem;
-            padding: 10px 25px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            transition: background-color 0.2s, transform 0.1s;
-            min-width: 100px;
-        }
+interface MenuConfig {
+  restaurantName: string;
+  isOpen: boolean;
+  items: MenuItem[];
+  updatedAt?: any;
+}
 
-        button:active {
-            transform: scale(0.98);
-        }
+interface Order {
+  id: string;
+  userId: string;
+  userName: string;
+  itemName: string;
+  itemPrice: number;
+  note?: string;
+  timestamp: any;
+}
 
-        /* 按鈕特定樣式 */
-        #startBtn {
-            background-color: #4CAF50; /* 綠色 */
-            color: white;
-        }
-        #startBtn:disabled {
-            background-color: #a5d6a7;
-            cursor: not-allowed;
-            transform: none;
-        }
+interface MenuTemplate {
+  id: string;
+  restaurantName: string;
+  items: MenuItem[];
+  createdAt?: any;
+}
 
-        #stopBtn {
-            background-color: #f44336; /* 紅色 */
-            color: white;
-        }
-        #stopBtn:disabled {
-            background-color: #ef9a9a;
-            cursor: not-allowed;
-            transform: none;
-        }
+// 新增歷史紀錄介面
+interface HistoryRecord {
+  id: string;
+  date: any;
+  restaurantName: string;
+  orders: Order[];
+  totalCount: number;
+  totalAmount: number;
+}
 
-        #resetBtn {
-            background-color: #2196F3; /* 藍色 */
-            color: white;
-        }
-        #resetBtn:disabled {
-            background-color: #90caf9;
-            cursor: not-allowed;
-            transform: none;
-        }
+// --- 通用元件：提示訊息 (Toast) ---
+function Toast({ message, type, onClose }: { message: string, type: 'success' | 'error' | 'info', onClose: () => void }) {
+  useEffect(() => {
+    const timer = setTimeout(onClose, 3000);
+    return () => clearTimeout(timer);
+  }, [onClose]);
 
-        /* 響應式設計：手機版字體縮小 */
-        @media (max-width: 480px) {
-            .time-display {
-                font-size: 2.5rem;
-            }
-            button {
-                padding: 10px 15px;
-                min-width: 80px;
-                font-size: 1rem;
-            }
-        }
-    </style>
-</head>
-<body>
+  const bgColors = {
+    success: 'bg-green-100 border-green-200 text-green-800',
+    error: 'bg-red-100 border-red-200 text-red-800',
+    info: 'bg-blue-100 border-blue-200 text-blue-800'
+  };
 
-    <div class="container">
-        <!-- 時間顯示區域 -->
-        <div class="time-display" id="display">00:00:00</div>
+  const Icons = {
+    success: CheckCircle2,
+    error: AlertCircle,
+    info: AlertCircle
+  };
 
-        <!-- 控制按鈕區域 -->
-        <div class="controls">
-            <button id="startBtn">開始</button>
-            <button id="stopBtn" disabled>暫停</button>
-            <button id="resetBtn" disabled>重設</button>
-        </div>
+  const Icon = Icons[type];
+
+  return (
+    <div className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-[60] px-4 py-3 rounded-lg shadow-lg border flex items-center gap-2 ${bgColors[type]} transition-all animate-fade-in-down`}>
+      <Icon className="w-5 h-5" />
+      <span className="font-medium">{message}</span>
     </div>
+  );
+}
 
-    <script>
-        /* --- JavaScript 邏輯 --- */
+// --- 通用元件：模態對話框 (Modal) ---
+function Modal({ isOpen, title, children, onClose }: { isOpen: boolean, title: string, children: React.ReactNode, onClose: () => void }) {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-[50] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-scale-up flex flex-col max-h-[90vh]">
+        <div className="flex justify-between items-center p-4 border-b border-gray-100 shrink-0">
+          <h3 className="font-bold text-lg text-gray-800">{title}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="p-4 overflow-y-auto">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- 管理員登入元件 ---
+function AdminLogin({ onCancel, onSuccess }: { onCancel: () => void, onSuccess: () => void }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loggingIn, setLoggingIn] = useState(false);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoggingIn(true);
+    setError('');
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      onSuccess();
+    } catch (err: any) {
+      console.error(err);
+      if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+        setError('帳號或密碼錯誤');
+      } else if (err.code === 'auth/too-many-requests') {
+        setError('登入嘗試次數過多，請稍後再試');
+      } else {
+        setError('登入失敗，請檢查網路或稍後再試');
+      }
+    } finally {
+      setLoggingIn(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[50vh] p-4 animate-fade-in">
+      <div className="bg-white p-8 rounded-2xl shadow-lg w-full max-w-sm border border-gray-100">
+        <div className="text-center mb-6">
+          <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Lock className="w-8 h-8" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800">管理員登入</h2>
+          <p className="text-sm text-gray-500 mt-2">請輸入管理員帳號密碼以進入後台</p>
+        </div>
+
+        <form onSubmit={handleLogin} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Email 帳號</label>
+            <input 
+              type="email" 
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              placeholder="admin@example.com"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">密碼</label>
+            <input 
+              type="password" 
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              placeholder="••••••••"
+              required
+            />
+          </div>
+          
+          {error && (
+            <div className="text-red-500 text-sm bg-red-50 p-2 rounded flex items-center gap-2">
+              <AlertCircle className="w-4 h-4" /> {error}
+            </div>
+          )}
+
+          <button 
+            type="submit" 
+            disabled={loggingIn}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-all shadow-sm disabled:opacity-70 flex justify-center items-center gap-2"
+          >
+            {loggingIn ? '登入中...' : <><LogIn className="w-4 h-4" /> 登入後台</>}
+          </button>
+          
+          <button 
+            type="button" 
+            onClick={onCancel}
+            className="w-full text-gray-500 hover:text-gray-700 font-medium py-2 text-sm"
+          >
+            返回前台點餐
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// --- 主應用程式 ---
+export default function BentoApp() {
+  const [user, setUser] = useState<any>(null);
+  const [view, setView] = useState<'user' | 'admin'>('user');
+  const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ message, type });
+  };
+  
+  // 資料狀態
+  const [menuConfig, setMenuConfig] = useState<MenuConfig>({
+    restaurantName: '',
+    isOpen: true,
+    items: []
+  });
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // 使用者表單狀態
+  const [currentUserName, setCurrentUserName] = useState('');
+  const [hasJoined, setHasJoined] = useState(false);
+
+  // 確認對話框狀態
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void | Promise<void>;
+  }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
+
+  const openConfirm = (title: string, message: string, onConfirm: () => void | Promise<void>) => {
+    setConfirmDialog({ isOpen: true, title, message, onConfirm });
+  };
+
+  // --- 認證與資料監聽 ---
+  useEffect(() => {
+    const initAuth = async () => {
+      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        await signInWithCustomToken(auth, __initial_auth_token);
+      } else {
+        // 預設為匿名登入 (一般使用者)
+        await signInAnonymously(auth);
+      }
+    };
+    initAuth();
+    
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // 監聽菜單設定
+  useEffect(() => {
+    if (!user) return; // 確保有使用者身分才開始監聽
+    
+    const menuRef = doc(db, 'artifacts', appId, 'public', 'data', 'bento_content', 'daily_menu');
+    
+    const unsubMenu = onSnapshot(menuRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data() as MenuConfig;
+        setMenuConfig({
+          ...data,
+          items: Array.isArray(data.items) ? data.items : []
+        });
+      } else {
+        setMenuConfig({ restaurantName: '尚未設定', isOpen: true, items: [] });
+      }
+      setLoading(false);
+    }, (error) => {
+      console.error("Menu fetch error", error);
+      setLoading(false);
+    });
+
+    const ordersRef = collection(db, 'artifacts', appId, 'public', 'data', 'daily_orders');
+    
+    const unsubOrders = onSnapshot(ordersRef, (snapshot) => {
+      const loadedOrders: Order[] = [];
+      snapshot.forEach(doc => {
+        loadedOrders.push({ id: doc.id, ...doc.data() } as Order);
+      });
+      loadedOrders.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+      setOrders(loadedOrders);
+    }, (error) => {
+      console.error("Orders fetch error", error);
+    });
+
+    return () => {
+      unsubMenu();
+      unsubOrders();
+    };
+  }, [user]); // FIX: 加入 user 作為依賴，確保在登入後重新執行
+
+  // --- 商業邏輯 ---
+
+  const saveMenuConfig = async (newConfig: MenuConfig) => {
+    if (!user) return;
+    try {
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'bento_content', 'daily_menu'), {
+        ...newConfig,
+        updatedAt: serverTimestamp()
+      });
+      showToast('菜單設定已更新！', 'success');
+    } catch (e) {
+      console.error(e);
+      showToast('更新失敗，請重試', 'error');
+    }
+  };
+
+  const toggleStoreStatus = async () => {
+    if (!user) return;
+    const newStatus = !menuConfig.isOpen;
+    const actionName = newStatus ? '重新開放' : '結單';
+    
+    openConfirm(
+      `${actionName}確認`, 
+      `確定要${actionName}嗎？${!newStatus ? '結單後前台將無法點餐，並會顯示歷史訂單紀錄。' : ''}`, 
+      async () => {
+        try {
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'bento_content', 'daily_menu'), {
+            ...menuConfig,
+            isOpen: newStatus,
+            updatedAt: serverTimestamp()
+          });
+          showToast(`已${actionName}！`, 'success');
+        } catch (e) {
+          console.error(e);
+          showToast('操作失敗', 'error');
+        }
+      }
+    );
+  };
+
+  const submitOrderBatch = async (items: CartItem[]) => {
+    if (!user || !currentUserName) {
+      showToast('請先輸入您的姓名', 'error');
+      return false;
+    }
+    if (items.length === 0) return false;
+
+    try {
+      const batch = writeBatch(db);
+      const ordersRef = collection(db, 'artifacts', appId, 'public', 'data', 'daily_orders');
+
+      items.forEach(item => {
+        const newDocRef = doc(ordersRef);
+        batch.set(newDocRef, {
+          userId: user.uid,
+          userName: currentUserName,
+          itemName: item.name,
+          itemPrice: item.price,
+          note: item.note || '',
+          timestamp: serverTimestamp()
+        });
+      });
+
+      await batch.commit();
+      showToast(`成功送出 ${items.length} 筆訂單！`, 'success');
+      return true;
+    } catch (e) {
+      console.error(e);
+      showToast('訂購失敗', 'error');
+      return false;
+    }
+  };
+
+  const deleteOrder = async (orderId: string) => {
+    openConfirm('刪除訂單', '確定要刪除這筆訂單嗎？', async () => {
+      try {
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'daily_orders', orderId));
+        showToast('訂單已刪除', 'success');
+      } catch (e) {
+        console.error(e);
+      }
+    });
+  };
+
+  const clearAllOrders = async () => {
+    openConfirm('清空並封存', '這將把目前的訂單移入「歷史紀錄」中保存，並清空列表以開始新的一天。確定嗎？', async () => {
+      try {
+        // 1. 準備封存資料
+        if (orders.length > 0) {
+          const historyData = {
+            date: serverTimestamp(),
+            restaurantName: menuConfig.restaurantName || '未命名餐廳',
+            orders: orders,
+            totalCount: orders.length,
+            totalAmount: orders.reduce((sum, o) => sum + (Number(o.itemPrice) || 0), 0)
+          };
+          
+          // 2. 寫入歷史紀錄集合
+          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'order_history'), historyData);
+        }
+
+        // 3. 刪除現有訂單 (批次刪除)
+        const ordersRef = collection(db, 'artifacts', appId, 'public', 'data', 'daily_orders');
+        const snapshot = await getDocs(ordersRef);
+        const batch = writeBatch(db);
+        snapshot.docs.forEach((doc) => {
+          batch.delete(doc.ref);
+        });
         
-        // 取得 DOM 元素
-        const display = document.getElementById('display');
-        const startBtn = document.getElementById('startBtn');
-        const stopBtn = document.getElementById('stopBtn');
-        const resetBtn = document.getElementById('resetBtn');
+        await batch.commit();
+        showToast('訂單已封存並清空！', 'success');
+      } catch (e) {
+        console.error(e);
+        showToast('封存失敗', 'error');
+      }
+    });
+  };
 
-        // 狀態變數
-        let startTime = 0;
-        let elapsedTime = 0;
-        let timerInterval = null;
-        let isRunning = false;
+  // 登出功能
+  const handleAdminLogout = async () => {
+    openConfirm('登出確認', '確定要登出後台管理嗎？', async () => {
+      try {
+        await signOut(auth);
+        // 登出後，恢復為匿名訪客，以便可以繼續使用前台
+        await signInAnonymously(auth);
+        setView('user');
+        showToast('已安全登出', 'success');
+      } catch (e) {
+        console.error(e);
+        showToast('登出失敗', 'error');
+      }
+    });
+  };
 
-        // 格式化時間函數
-        function formatTime(ms) {
-            // 計算分鐘、秒、百分之一秒 (10ms)
-            // 1 分鐘 = 60000 毫秒
-            const minutes = Math.floor(ms / 60000);
-            
-            // 1 秒 = 1000 毫秒
-            const seconds = Math.floor((ms % 60000) / 1000);
-            
-            // 百分之一秒 (取前兩位)
-            const hundredths = Math.floor((ms % 1000) / 10);
+  const stats = useMemo(() => {
+    const summary: Record<string, { count: number, total: number }> = {};
+    let grandTotal = 0;
+    let totalCount = 0;
 
-            // 補零並組合成字串
-            const minStr = minutes.toString().padStart(2, '0');
-            const secStr = seconds.toString().padStart(2, '0');
-            const hundStr = hundredths.toString().padStart(2, '0');
+    orders.forEach(order => {
+      const price = Number(order.itemPrice) || 0;
+      const name = order.itemName || '未知名稱';
 
-            return `${minStr}:${secStr}:${hundStr}`;
+      if (!summary[name]) {
+        summary[name] = { count: 0, total: 0 };
+      }
+      summary[name].count += 1;
+      summary[name].total += price;
+      grandTotal += price;
+      totalCount += 1;
+    });
+
+    return { summary, grandTotal, totalCount };
+  }, [orders]);
+
+  if (loading) return <div className="flex h-screen items-center justify-center text-gray-500">載入系統中...</div>;
+
+  // 判斷是否為管理員 (非匿名登入)
+  const isAdmin = user && !user.isAnonymous;
+
+  return (
+    <div className="min-h-screen bg-gray-50 font-sans text-gray-800">
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      
+      <Modal 
+        isOpen={confirmDialog.isOpen} 
+        title={confirmDialog.title} 
+        onClose={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+      >
+        <p className="text-gray-600 mb-6">{confirmDialog.message}</p>
+        <div className="flex gap-3 justify-end">
+          <button 
+            onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+            className="px-4 py-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            取消
+          </button>
+          <button 
+            onClick={async () => {
+              await confirmDialog.onConfirm();
+              setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+            }}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors shadow-sm"
+          >
+            確定執行
+          </button>
+        </div>
+      </Modal>
+
+      <nav className="bg-white shadow-sm sticky top-0 z-40">
+        <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-orange-600 font-bold text-xl">
+            <Utensils className="w-6 h-6" />
+            <span>好食訂便當</span>
+          </div>
+          <div className="flex gap-2">
+            <button 
+              onClick={() => setView('user')}
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${view === 'user' ? 'bg-orange-100 text-orange-700' : 'text-gray-500 hover:bg-gray-100'}`}
+            >
+              前台點餐
+            </button>
+            <button 
+              onClick={() => setView('admin')}
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors flex items-center gap-1 ${view === 'admin' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'}`}
+            >
+              {isAdmin ? <Lock className="w-3 h-3" /> : <Lock className="w-3 h-3" />} 後台管理
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      <main className="max-w-4xl mx-auto p-4">
+        {view === 'user' ? (
+          <UserView 
+            menuConfig={menuConfig} 
+            orders={orders}
+            currentUserName={currentUserName}
+            setCurrentUserName={setCurrentUserName}
+            hasJoined={hasJoined}
+            setHasJoined={setHasJoined}
+            onSubmitBatch={submitOrderBatch}
+            myDelete={deleteOrder}
+            showToast={showToast}
+            stats={stats}
+          />
+        ) : (
+          // 檢查權限：如果是匿名使用者，顯示登入畫面；否則顯示後台
+          !isAdmin ? (
+            <AdminLogin 
+              onCancel={() => setView('user')} 
+              onSuccess={() => showToast('歡迎回來，管理員！', 'success')}
+            />
+          ) : (
+            <AdminView 
+              menuConfig={menuConfig}
+              orders={orders}
+              stats={stats}
+              onSaveConfig={saveMenuConfig}
+              onDeleteOrder={deleteOrder}
+              onClearOrders={clearAllOrders}
+              showToast={showToast}
+              openConfirm={openConfirm}
+              onToggleStatus={toggleStoreStatus}
+              onLogout={handleAdminLogout} // 傳入登出功能
+              user={user} // 傳入 user 物件以供依賴檢查
+            />
+          )
+        )}
+      </main>
+    </div>
+  );
+}
+
+// ... UserView (保持不變) ...
+function UserView({ 
+  menuConfig, orders, currentUserName, setCurrentUserName, hasJoined, setHasJoined, onSubmitBatch, myDelete, showToast, stats
+}: any) {
+  const myOrders = orders.filter((o: Order) => o.userName === currentUserName && currentUserName !== '');
+  const items = Array.isArray(menuConfig.items) ? menuConfig.items : [];
+  const [cart, setCart] = useState<CartItem[]>([]);
+
+  const addToCart = (item: MenuItem) => {
+    setCart(prev => [...prev, { ...item, note: '' }]);
+    showToast(`已加入清單: ${item.name}`, 'success');
+  };
+
+  const removeFromCart = (index: number) => {
+    setCart(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const updateCartNote = (index: number, note: string) => {
+    setCart(prev => {
+      const newCart = [...prev];
+      newCart[index] = { ...newCart[index], note };
+      return newCart;
+    });
+  };
+
+  const handleBatchSubmit = async () => {
+    if (cart.length === 0) return;
+    const success = await onSubmitBatch(cart);
+    if (success) {
+      setCart([]); 
+    }
+  };
+
+  if (!menuConfig.isOpen) {
+    return (
+      <div className="flex flex-col items-center justify-center py-10 animate-fade-in">
+        <div className="text-center mb-8">
+          <div className="bg-gray-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+            <LogOut className="w-8 h-8 text-gray-400" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-700">今日訂餐已截止</h2>
+          <p className="text-gray-500 mt-2">今日餐廳：{menuConfig.restaurantName}</p>
+          <div className="mt-4 inline-block bg-gray-100 px-4 py-2 rounded-lg">
+            <span className="text-gray-600 font-medium">總計：{stats.totalCount} 份 / ${stats.grandTotal}</span>
+          </div>
+        </div>
+
+        <div className="w-full max-w-2xl bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex items-center gap-2">
+            <ClipboardList className="w-5 h-5 text-gray-500" />
+            <h3 className="font-bold text-gray-700">今日歷史訂單紀錄</h3>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {orders.length === 0 ? (
+              <div className="p-8 text-center text-gray-400">今日無任何訂單</div>
+            ) : (
+              orders.map((order: Order) => (
+                <div key={order.id} className="flex justify-between items-center px-6 py-3 hover:bg-gray-50">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-gray-800">{order.userName}</span>
+                      <span className="text-sm text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{order.itemName}</span>
+                    </div>
+                    {order.note && <div className="text-xs text-gray-400 mt-1">備註: {order.note}</div>}
+                  </div>
+                  <span className="font-medium text-gray-600">${order.itemPrice}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!hasJoined) {
+    return (
+      <div className="max-w-md mx-auto mt-10 bg-white p-8 rounded-2xl shadow-lg text-center animate-scale-up">
+        <div className="w-16 h-16 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mx-auto mb-4">
+          <User className="w-8 h-8" />
+        </div>
+        <h2 className="text-2xl font-bold mb-2">歡迎點餐</h2>
+        <p className="text-gray-500 mb-6">
+          今日餐廳：
+          <span className="font-bold text-gray-800 ml-1">
+            {menuConfig.restaurantName || '尚未設定'}
+          </span>
+        </p>
+        
+        <input 
+          type="text" 
+          value={currentUserName}
+          onChange={(e) => setCurrentUserName(e.target.value)}
+          placeholder="請輸入您的姓名/暱稱"
+          className="w-full px-4 py-3 border border-gray-200 rounded-xl mb-4 focus:outline-none focus:ring-2 focus:ring-orange-500"
+        />
+        <button 
+          onClick={() => {
+            if(currentUserName.trim()) setHasJoined(true);
+            else showToast('請輸入名字', 'error');
+          }}
+          className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 rounded-xl transition-all shadow-md hover:shadow-lg"
+        >
+          開始點餐
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6 animate-fade-in pb-20">
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-orange-100">
+        <div className="flex justify-between items-start mb-4">
+          <div>
+            <span className="text-sm text-gray-500">Hi, {currentUserName}</span>
+            <h2 className="text-2xl font-bold text-gray-800 mt-1">{menuConfig.restaurantName}</h2>
+          </div>
+          <button onClick={() => setHasJoined(false)} className="text-xs text-gray-400 hover:text-gray-600 underline">
+            更換名字
+          </button>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {items.map((item: MenuItem) => (
+            <button 
+              key={item.id}
+              onClick={() => addToCart(item)}
+              className="flex items-center justify-between p-4 border border-gray-100 rounded-xl hover:border-orange-500 hover:bg-orange-50 transition-all group bg-white hover:shadow-md"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-gray-100 group-hover:bg-orange-200 flex items-center justify-center text-gray-500 group-hover:text-orange-700 transition-colors">
+                  <Utensils className="w-5 h-5" />
+                </div>
+                <div className="text-left">
+                  <div className="font-bold text-gray-800">{item.name}</div>
+                  <div className="text-sm text-gray-500">${item.price}</div>
+                </div>
+              </div>
+              <PlusCircle className="w-6 h-6 text-gray-300 group-hover:text-orange-600" />
+            </button>
+          ))}
+        </div>
+        {items.length === 0 && (
+          <div className="text-center py-10 text-gray-400">
+            管理員尚未設定菜單
+          </div>
+        )}
+      </div>
+
+      {cart.length > 0 && (
+        <div className="bg-orange-50 border border-orange-200 p-4 rounded-xl shadow-md border-l-4 border-l-orange-500">
+          <h3 className="font-bold text-orange-800 mb-2 flex items-center gap-2">
+            <ShoppingBag className="w-5 h-5" />
+            已選擇餐點 (尚未送出)
+          </h3>
+          <ul className="space-y-2 mb-4">
+            {cart.map((item, index) => (
+              <li key={index} className="flex flex-col gap-2 bg-white p-3 rounded-lg shadow-sm">
+                <div className="flex justify-between items-center w-full">
+                  <span className="font-medium text-gray-800">
+                    {item.name} 
+                    <span className="text-gray-400 text-sm ml-1">(${item.price})</span>
+                  </span>
+                  <button onClick={() => removeFromCart(index)} className="text-gray-400 hover:text-red-600 p-1">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="flex items-center gap-2 w-full">
+                  <MessageSquare className="w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={item.note}
+                    onChange={(e) => updateCartNote(index, e.target.value)}
+                    placeholder="備註 (如: 不加蔥、飯少...)"
+                    className="flex-1 text-sm bg-gray-50 border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-orange-300 placeholder-gray-400 text-gray-600"
+                  />
+                </div>
+              </li>
+            ))}
+          </ul>
+          <div className="flex justify-between items-center pt-3 border-t border-orange-200">
+            <span className="font-bold text-orange-800">
+              小計: ${cart.reduce((sum, item) => sum + item.price, 0)}
+            </span>
+            <button 
+              onClick={handleBatchSubmit}
+              className="bg-orange-600 hover:bg-orange-700 text-white px-6 py-2 rounded-lg font-bold shadow-sm transition-all flex items-center gap-2"
+            >
+              <Send className="w-4 h-4" /> 送出訂單
+            </button>
+          </div>
+        </div>
+      )}
+
+      {myOrders.length > 0 && (
+        <div className="bg-green-50 border border-green-200 p-4 rounded-xl opacity-80 hover:opacity-100 transition-opacity">
+          <h3 className="font-bold text-green-800 mb-2 flex items-center gap-2">
+            <ShoppingBag className="w-5 h-5" />
+            歷史訂單 (已送出)
+          </h3>
+          <ul className="space-y-2">
+            {myOrders.map((order: Order) => (
+              <li key={order.id} className="flex flex-col bg-white p-2 rounded-lg shadow-sm">
+                <div className="flex justify-between items-center">
+                  <span>
+                    {order.itemName} 
+                    <span className="text-gray-400 text-sm ml-1">(${order.itemPrice})</span>
+                  </span>
+                  <button onClick={() => myDelete(order.id)} className="text-red-400 hover:text-red-600 p-1">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+                {order.note && (
+                  <div className="text-xs text-gray-500 mt-1 pl-1 border-l-2 border-green-200">
+                    備註: {order.note}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+          <div className="mt-3 pt-3 border-t border-green-200 text-right font-bold text-green-800">
+            總計: ${myOrders.reduce((sum: number, o: Order) => sum + (Number(o.itemPrice) || 0), 0)}
+          </div>
+        </div>
+      )}
+      
+      <div className="text-center text-sm text-gray-400 mt-8">
+        目前全體已訂購 {orders.length} 份餐點
+      </div>
+    </div>
+  );
+}
+
+function AdminView({ menuConfig, orders, stats, onSaveConfig, onDeleteOrder, onClearOrders, showToast, openConfirm, onToggleStatus, onLogout, user }: any) {
+  const [editingConfig, setEditingConfig] = useState<MenuConfig>(menuConfig);
+  const [newItemName, setNewItemName] = useState('');
+  const [newItemPrice, setNewItemPrice] = useState('');
+  
+  const [templates, setTemplates] = useState<MenuTemplate[]>([]);
+  const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
+  const [templateNameInput, setTemplateNameInput] = useState('');
+
+  // 歷史紀錄相關狀態
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
+  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
+
+  // 檔案上傳 Ref
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setEditingConfig({
+      ...menuConfig,
+      items: Array.isArray(menuConfig.items) ? menuConfig.items : []
+    });
+  }, [menuConfig]);
+
+  useEffect(() => {
+    if (!user) return;
+    const templatesRef = collection(db, 'artifacts', appId, 'public', 'data', 'menu_templates');
+    const unsubscribe = onSnapshot(templatesRef, (snapshot) => {
+      const loadedTemplates: MenuTemplate[] = [];
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        loadedTemplates.push({ 
+          id: doc.id, 
+          restaurantName: data.restaurantName,
+          items: Array.isArray(data.items) ? data.items : [],
+          createdAt: data.createdAt
+        });
+      });
+      
+      loadedTemplates.sort((a, b) => {
+        const timeA = a.createdAt?.seconds || 0;
+        const timeB = b.createdAt?.seconds || 0;
+        return timeB - timeA;
+      });
+
+      setTemplates(loadedTemplates);
+    }, (error) => {
+      console.error("Templates fetch error", error);
+    });
+    return () => unsubscribe();
+  }, [user]);
+
+  // 監聽歷史紀錄
+  useEffect(() => {
+    if (!user) return;
+    if (!isHistoryModalOpen) return; // 只在打開 Modal 時監聽
+
+    const historyRef = collection(db, 'artifacts', appId, 'public', 'data', 'order_history');
+    const unsubscribe = onSnapshot(historyRef, (snapshot) => {
+      const loadedHistory: HistoryRecord[] = [];
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        loadedHistory.push({
+          id: doc.id,
+          date: data.date,
+          restaurantName: data.restaurantName,
+          orders: Array.isArray(data.orders) ? data.orders : [],
+          totalCount: data.totalCount || 0,
+          totalAmount: data.totalAmount || 0
+        });
+      });
+
+      // 依日期排序 (最新的在最上面)
+      loadedHistory.sort((a, b) => (b.date?.seconds || 0) - (a.date?.seconds || 0));
+      setHistoryRecords(loadedHistory);
+    });
+
+    return () => unsubscribe();
+  }, [isHistoryModalOpen, user]);
+
+  const handleAddItem = () => {
+    if (!newItemName || !newItemPrice) return;
+    const newItem: MenuItem = {
+      id: Date.now().toString(),
+      name: newItemName,
+      price: parseInt(newItemPrice) || 0
+    };
+    setEditingConfig(prev => ({
+      ...prev,
+      items: [...prev.items, newItem]
+    }));
+    setNewItemName('');
+    setNewItemPrice('');
+  };
+
+  const handleRemoveItem = (id: string) => {
+    setEditingConfig(prev => ({
+      ...prev,
+      items: prev.items.filter(item => item.id !== id)
+    }));
+  };
+
+  const handleSave = () => {
+    onSaveConfig(editingConfig);
+  };
+
+  const handleOpenSaveModal = () => {
+    if (!editingConfig.restaurantName) {
+      showToast('請先輸入餐廳名稱才能儲存為範本', 'error');
+      return;
+    }
+    setTemplateNameInput(editingConfig.restaurantName);
+    setIsSaveModalOpen(true);
+  };
+
+  const handleConfirmSaveTemplate = async () => {
+    if (!templateNameInput) {
+      showToast('請輸入範本名稱', 'error');
+      return;
+    }
+
+    try {
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'menu_templates'), {
+        restaurantName: templateNameInput, 
+        items: editingConfig.items,
+        createdAt: serverTimestamp()
+      });
+      setIsSaveModalOpen(false);
+      showToast(`已將「${templateNameInput}」加入常用菜單庫！`, 'success');
+    } catch (e) {
+      console.error(e);
+      showToast('儲存範本失敗', 'error');
+    }
+  };
+
+  const handleLoadTemplate = (template: MenuTemplate) => {
+    openConfirm('載入範本', `確定要載入「${template.restaurantName}」的菜單嗎？目前的編輯內容將被覆蓋。`, () => {
+      setEditingConfig(prev => ({
+        ...prev,
+        restaurantName: template.restaurantName,
+        items: template.items
+      }));
+      showToast('範本已載入', 'success');
+    });
+  };
+
+  const handleDeleteTemplate = async (id: string, name: string) => {
+    openConfirm('刪除範本', `確定要刪除「${name}」這個常用菜單嗎？`, async () => {
+      try {
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'menu_templates', id));
+        showToast('範本已刪除', 'success');
+      } catch (e) {
+        console.error(e);
+        showToast('刪除失敗', 'error');
+      }
+    });
+  };
+
+  // 通用匯出 CSV 功能 (支援當日訂單與歷史訂單)
+  const exportOrdersToCSV = (ordersToExport: Order[], fileName: string) => {
+    if (ordersToExport.length === 0) {
+      showToast('目前沒有訂單可以匯出', 'info');
+      return;
+    }
+
+    const totalCount = ordersToExport.length;
+    const totalAmount = ordersToExport.reduce((sum: number, order: Order) => sum + (Number(order.itemPrice) || 0), 0);
+
+    const headers = ['下單時間', '姓名', '品項', '價格', '備註'];
+    
+    const csvContent = ordersToExport.map((order: Order) => {
+      let timeStr = '';
+      if (order.timestamp && order.timestamp.seconds) {
+        const date = new Date(order.timestamp.seconds * 1000);
+        timeStr = date.toLocaleString('zh-TW', { hour12: false });
+      } else {
+        timeStr = '處理中...';
+      }
+      
+      const safeName = order.userName ? order.userName.replace(/"/g, '""') : '';
+      const safeItem = order.itemName ? order.itemName.replace(/"/g, '""') : '';
+      const safeNote = order.note ? order.note.replace(/"/g, '""') : '';
+      
+      return `"${timeStr}","${safeName}","${safeItem}",${order.itemPrice},"${safeNote}"`;
+    });
+
+    csvContent.push(''); 
+    csvContent.push(`,,總份數,${totalCount},`);
+    csvContent.push(`,,總金額,${totalAmount},`);
+
+    const csvString = '\uFEFF' + [headers.join(','), ...csvContent].join('\n');
+    
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    showToast('已匯出 CSV 檔案 (含統計資訊)', 'success');
+  };
+
+  // 匯出當日訂單 (Wrapper)
+  const handleExportCurrentOrders = () => {
+    exportOrdersToCSV(orders, `訂便當統計_${new Date().toISOString().slice(0, 10)}.csv`);
+  };
+
+  // 處理檔案上傳
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // 解析檔名：移除 .csv 以及 Google 下載常見的 " - 工作表1"
+    let restaurantName = file.name.replace(/\.csv$/i, '');
+    restaurantName = restaurantName.replace(/ - 工作表1$/, '');
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const text = e.target?.result as string;
+      if (!text) return;
+
+      const lines = text.split(/\r\n|\n/); // Handle both line endings
+      const newItems: MenuItem[] = [];
+
+      lines.forEach(line => {
+        const cleanLine = line.trim();
+        if (!cleanLine) return;
+
+        let name = '';
+        let price = 0;
+
+        // 策略 1: 根據使用者提供的格式 "編號 品名 $ 價格"
+        if (cleanLine.includes('$')) {
+          const parts = cleanLine.split('$');
+          const namePart = parts[0].trim();
+          const pricePart = parts[1].trim();
+          
+          // 移除開頭的編號 (例如 "1 ", "02 ")
+          name = namePart.replace(/^[\d\s\.]+/, ''); 
+          price = parseInt(pricePart.replace(/[^\d]/g, '')); // 只留數字
+        } 
+        // 策略 2: 標準 CSV 格式 "品名,價格" (以防萬一)
+        else if (cleanLine.includes(',')) {
+          const lastCommaIndex = cleanLine.lastIndexOf(',');
+          const namePart = cleanLine.substring(0, lastCommaIndex).trim();
+          const pricePart = cleanLine.substring(lastCommaIndex + 1).trim();
+          
+          name = namePart.replace(/^[\d\s\.]+/, '');
+          price = parseInt(pricePart.replace(/[^\d]/g, ''));
         }
 
-        // 更新顯示函數
-        function updateDisplay() {
-            // 計算當前經過的總時間
-            const currentTime = Date.now();
-            const timeDiff = currentTime - startTime + elapsedTime;
-            
-            display.textContent = formatTime(timeDiff);
+        if (name && !isNaN(price) && price > 0) {
+          newItems.push({
+            id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+            name: name,
+            price: price
+          });
         }
+      });
 
-        // 開始按鈕事件
-        startBtn.addEventListener('click', () => {
-            if (!isRunning) {
-                isRunning = true;
-                startTime = Date.now();
+      if (newItems.length > 0) {
+        try {
+          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'menu_templates'), {
+            restaurantName: restaurantName,
+            items: newItems,
+            createdAt: serverTimestamp()
+          });
+          showToast(`已成功匯入「${restaurantName}」，共 ${newItems.length} 個品項！`, 'success');
+        } catch (error) {
+          console.error("Import failed", error);
+          showToast('匯入失敗，請稍後再試', 'error');
+        }
+      } else {
+        showToast('無法解析檔案內容，請確認格式是否正確 (名稱 $ 價格)', 'error');
+      }
+      
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in">
+      {/* 儲存範本 Modal */}
+      <Modal 
+        isOpen={isSaveModalOpen} 
+        title="儲存為常用菜單" 
+        onClose={() => setIsSaveModalOpen(false)}
+      >
+        <div className="space-y-4">
+          <p className="text-gray-600 text-sm">請為這份菜單設定一個好記的名稱（例如：必勝客、巷口麵店），方便下次快速載入。</p>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">範本名稱</label>
+            <input 
+              type="text" 
+              value={templateNameInput}
+              onChange={(e) => setTemplateNameInput(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              placeholder="輸入名稱..."
+              autoFocus
+            />
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button 
+              onClick={() => setIsSaveModalOpen(false)}
+              className="px-4 py-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              取消
+            </button>
+            <button 
+              onClick={handleConfirmSaveTemplate}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm flex items-center gap-2"
+            >
+              <Save className="w-4 h-4" /> 確認儲存
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* 歷史紀錄 Modal */}
+      <Modal
+        isOpen={isHistoryModalOpen}
+        title="📜 歷史訂單紀錄"
+        onClose={() => setIsHistoryModalOpen(false)}
+      >
+        <div className="space-y-4 min-w-[300px]">
+          {historyRecords.length === 0 ? (
+            <div className="text-center text-gray-400 py-8">目前沒有封存的歷史紀錄</div>
+          ) : (
+            historyRecords.map((record) => (
+              <div key={record.id} className="border border-gray-200 rounded-lg overflow-hidden">
+                <div 
+                  className="w-full flex justify-between items-center p-4 bg-gray-50 hover:bg-gray-100 transition-colors cursor-pointer"
+                  onClick={() => setExpandedHistoryId(expandedHistoryId === record.id ? null : record.id)}
+                >
+                  <div>
+                    <div className="font-bold text-gray-800 flex items-center gap-2">
+                      <Calendar className="w-4 h-4 text-gray-500" />
+                      {record.date ? new Date(record.date.seconds * 1000).toLocaleDateString() : '未知日期'}
+                      <span className="text-gray-400 font-normal">|</span>
+                      {record.restaurantName}
+                    </div>
+                    <div className="text-sm text-gray-500 mt-1">
+                      總計: {record.totalCount} 份 / ${record.totalAmount}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {/* 匯出歷史紀錄按鈕 */}
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation(); // 防止觸發展開/收合
+                        const dateStr = record.date ? new Date(record.date.seconds * 1000).toISOString().slice(0, 10) : 'unknown_date';
+                        exportOrdersToCSV(record.orders, `歷史訂單_${dateStr}_${record.restaurantName}.csv`);
+                      }}
+                      className="p-2 bg-white text-green-600 rounded-full hover:bg-green-50 border border-green-200 shadow-sm"
+                      title="匯出此紀錄"
+                    >
+                      <FileSpreadsheet className="w-4 h-4" />
+                    </button>
+                    {expandedHistoryId === record.id ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
+                  </div>
+                </div>
                 
-                // 啟動計時器，每 10ms 更新一次 (模擬 100Hz)
-                timerInterval = setInterval(updateDisplay, 10);
+                {expandedHistoryId === record.id && (
+                  <div className="p-4 bg-white border-t border-gray-200">
+                    <table className="w-full text-sm">
+                      <thead className="text-gray-500 bg-gray-50">
+                        <tr>
+                          <th className="px-2 py-1 text-left">姓名</th>
+                          <th className="px-2 py-1 text-left">品項</th>
+                          <th className="px-2 py-1 text-left">備註</th>
+                          <th className="px-2 py-1 text-right">價格</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {record.orders.map((order, idx) => (
+                          <tr key={idx}>
+                            <td className="px-2 py-2">{order.userName}</td>
+                            <td className="px-2 py-2">{order.itemName}</td>
+                            <td className="px-2 py-2 text-gray-400 text-xs">{order.note || '-'}</td>
+                            <td className="px-2 py-2 text-right">${order.itemPrice}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </Modal>
 
-                // 更新按鈕狀態
-                startBtn.disabled = true;
-                stopBtn.disabled = false;
-                resetBtn.disabled = true;
-                
-                // 改變文字為「繼續」 (為了下次暫停後顯示)
-                startBtn.textContent = "繼續";
-            }
-        });
+      <div className="space-y-6">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-amber-100">
+          <div className="flex items-center justify-between mb-4 border-b border-amber-100 pb-2">
+            <div className="flex items-center gap-2 text-amber-800 font-bold">
+              <BookOpen className="w-5 h-5" />
+              <h3>常用菜單庫</h3>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="text-sm bg-green-100 text-green-700 hover:bg-green-200 border border-green-200 flex items-center gap-1 px-2 py-1 rounded transition-colors"
+                title="從 Google 試算表匯出之 CSV 檔案匯入"
+              >
+                <Upload className="w-4 h-4" />
+                匯入 Google 表單 (CSV)
+              </button>
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleFileUpload} 
+                accept=".csv" 
+                className="hidden" 
+              />
+              
+              <button
+                onClick={() => setIsHistoryModalOpen(true)}
+                className="text-sm text-amber-600 hover:text-amber-800 flex items-center gap-1 px-2 py-1 rounded hover:bg-amber-50 transition-colors"
+              >
+                <History className="w-4 h-4" />
+                查看歷史紀錄
+              </button>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto pr-1">
+            {templates.map(template => (
+              <div key={template.id} className="flex justify-between items-center bg-amber-50 p-3 rounded-lg border border-amber-200">
+                <span className="font-medium text-amber-900">{template.restaurantName}</span>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => handleLoadTemplate(template)}
+                    className="p-1.5 bg-white text-blue-600 rounded shadow-sm hover:bg-blue-50 border border-blue-100"
+                    title="載入此菜單"
+                  >
+                    <Download className="w-4 h-4" />
+                  </button>
+                  <button 
+                    onClick={() => handleDeleteTemplate(template.id, template.restaurantName)}
+                    className="p-1.5 bg-white text-red-400 rounded shadow-sm hover:bg-red-50 border border-red-100"
+                    title="刪除"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+            {templates.length === 0 && (
+              <div className="text-center text-gray-400 py-4 text-sm">
+                目前沒有儲存的菜單範本
+              </div>
+            )}
+          </div>
+        </div>
 
-        // 暫停按鈕事件
-        stopBtn.addEventListener('click', () => {
-            if (isRunning) {
-                isRunning = false;
-                clearInterval(timerInterval);
-                
-                // 累加經過的時間
-                elapsedTime += Date.now() - startTime;
-                
-                // 更新按鈕狀態
-                startBtn.disabled = false;
-                stopBtn.disabled = true;
-                resetBtn.disabled = false;
-            }
-        });
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-blue-100">
+          <div className="flex items-center gap-2 mb-4 text-blue-800 font-bold border-b border-blue-100 pb-2">
+            <Settings className="w-5 h-5" />
+            <h3>今日菜單設定</h3>
+          </div>
 
-        // 重設按鈕事件
-        resetBtn.addEventListener('click', () => {
-            isRunning = false;
-            clearInterval(timerInterval);
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">餐廳名稱</label>
+              <input 
+                type="text" 
+                value={editingConfig.restaurantName || ''}
+                onChange={(e) => setEditingConfig({...editingConfig, restaurantName: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                placeholder="例如：正忠排骨飯"
+              />
+            </div>
             
-            // 重置變數
-            elapsedTime = 0;
-            startTime = 0;
-            
-            // 重置顯示
-            display.textContent = "00:00:00";
-            
-            // 更新按鈕狀態
-            startBtn.disabled = false;
-            stopBtn.disabled = true;
-            resetBtn.disabled = true;
-            
-            // 恢復文字為「開始」
-            startBtn.textContent = "開始";
-        });
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">新增品項</label>
+              <div className="flex gap-2">
+                <input 
+                  type="text" 
+                  value={newItemName}
+                  onChange={(e) => setNewItemName(e.target.value)}
+                  placeholder="品名 (如: 雞腿飯)"
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+                <input 
+                  type="number" 
+                  value={newItemPrice}
+                  onChange={(e) => setNewItemPrice(e.target.value)}
+                  placeholder="價格"
+                  className="w-24 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+                <button 
+                  onClick={handleAddItem}
+                  className="bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700"
+                >
+                  <PlusCircle className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
 
-    </script>
-</body>
-</html>
+            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+              {editingConfig.items.map((item, idx) => (
+                <div key={idx} className="flex justify-between items-center bg-gray-50 p-2 rounded border border-gray-200">
+                  <span className="text-sm">{item.name} (${item.price})</span>
+                  <button onClick={() => handleRemoveItem(item.id)} className="text-red-400 hover:text-red-600">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              {editingConfig.items.length === 0 && <div className="text-gray-400 text-sm text-center">尚未新增品項</div>}
+            </div>
+
+            <div className="flex items-center justify-between pt-4 border-t border-gray-100 gap-2">
+              <button
+                onClick={onToggleStatus}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-white shadow-sm transition-all mr-auto ${
+                  editingConfig.isOpen 
+                    ? 'bg-red-500 hover:bg-red-600' 
+                    : 'bg-green-500 hover:bg-green-600'
+                }`}
+              >
+                {editingConfig.isOpen ? (
+                  <>
+                    <Lock className="w-4 h-4" />
+                    立即結單
+                  </>
+                ) : (
+                  <>
+                    <Unlock className="w-4 h-4" />
+                    重新開放
+                  </>
+                )}
+              </button>
+
+              <button 
+                onClick={handleOpenSaveModal}
+                className="bg-amber-100 hover:bg-amber-200 text-amber-800 px-4 py-2 rounded-lg font-medium shadow-sm transition-all flex items-center gap-1 text-sm"
+                title="將目前設定存入常用菜單"
+              >
+                <Save className="w-4 h-4" /> 存為範本
+              </button>
+
+              <button 
+                onClick={handleSave}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium shadow transition-all"
+              >
+                儲存設定
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-red-100">
+          <div className="flex items-center gap-2 mb-4 text-red-800 font-bold border-b border-red-100 pb-2">
+            <RefreshCw className="w-5 h-5" />
+            <h3>每日重置</h3>
+          </div>
+          <p className="text-sm text-gray-500 mb-4">新的一天開始前，請按此按鈕封存並清空昨日的訂單。</p>
+          <button 
+            onClick={onClearOrders}
+            className="w-full border border-red-200 text-red-600 hover:bg-red-50 font-bold py-2 rounded-lg transition-colors flex items-center justify-center gap-2"
+          >
+            <Trash2 className="w-4 h-4" /> 清空並封存今日訂單
+          </button>
+        </div>
+
+        {/* 登出按鈕 */}
+        <div className="flex justify-end mt-4">
+          <button 
+            onClick={onLogout}
+            className="text-gray-500 hover:text-red-600 text-sm font-medium transition-colors flex items-center gap-1"
+          >
+            <LogOut className="w-4 h-4" /> 登出管理員
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-6">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-purple-100">
+          <div className="flex items-center gap-2 mb-4 text-purple-800 font-bold border-b border-purple-100 pb-2">
+            <ClipboardList className="w-5 h-5" />
+            <h3>訂購統計</h3>
+          </div>
+          
+          <div className="space-y-3">
+            {Object.entries(stats.summary).map(([name, data]: [string, any]) => (
+              <div key={name} className="flex justify-between items-center bg-purple-50 p-3 rounded-lg">
+                <span className="font-medium text-gray-800">{name}</span>
+                <div className="flex gap-4 text-sm">
+                  <span className="font-bold bg-white px-2 py-0.5 rounded text-purple-700">x {data.count}</span>
+                  <span className="text-gray-500 w-16 text-right">${data.total}</span>
+                </div>
+              </div>
+            ))}
+            {stats.totalCount === 0 && <div className="text-center text-gray-400 py-4">目前尚無訂單</div>}
+            
+            <div className="flex justify-between items-center pt-4 mt-2 border-t-2 border-dashed border-gray-200 font-bold text-lg">
+              <span>總計</span>
+              <div className="flex gap-4">
+                <span className="text-gray-500 text-sm flex items-center">{stats.totalCount} 份</span>
+                <span className="text-purple-700">${stats.grandTotal}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="font-bold text-gray-800">訂單明細列表</h3>
+            <button
+              onClick={handleExportCurrentOrders}
+              className="flex items-center gap-2 px-3 py-1.5 text-sm bg-green-100 text-green-700 hover:bg-green-200 rounded-lg transition-colors font-medium border border-green-200"
+              title="匯出為 CSV (可開啟於 Excel 或 Google 試算表)"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              匯出統計表
+            </button>
+          </div>
+          <div className="overflow-hidden">
+            <table className="min-w-full text-left text-sm">
+              <thead className="bg-gray-50 text-gray-500">
+                <tr>
+                  <th className="px-3 py-2">姓名</th>
+                  <th className="px-3 py-2">品項</th>
+                  <th className="px-3 py-2">備註</th>
+                  <th className="px-3 py-2 text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {orders.map((order: Order) => (
+                  <tr key={order.id} className="hover:bg-gray-50">
+                    <td className="px-3 py-2 font-medium">{order.userName}</td>
+                    <td className="px-3 py-2">{order.itemName}</td>
+                    <td className="px-3 py-2 text-gray-500">{order.note || '-'}</td>
+                    <td className="px-3 py-2 text-right">
+                      <button 
+                        onClick={() => onDeleteOrder(order.id)}
+                        className="text-gray-400 hover:text-red-500 transition-colors"
+                        title="刪除"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
